@@ -26,7 +26,8 @@ A backend owns:
 The current registered backends are:
 
 - `QwenGdnTargetOps` in `dflash_mlx/engine/target_qwen_gdn.py`;
-- `Gemma4TargetOps` in `dflash_mlx/engine/target_gemma4.py`.
+- `Gemma4TargetOps` in `dflash_mlx/engine/target_gemma4.py`;
+- `MuseGlimmerTargetOps` in `dflash_mlx/engine/target_muse_glimmer.py`. The muse_glimmer target has no mlx-lm implementation upstream, so the backend loads it through `dflash_mlx/models/muse_glimmer.py`, a text-only module registered into `sys.modules["mlx_lm.models.muse_glimmer"]` by `load_target_bundle` (it yields automatically once upstream mlx-lm ships the family). Its `muse_glimmer_assistant` drafter is dispatched by config in `runtime/loading.py::_get_dflash_model_classes`.
 
 ## When do you need a new backend?
 
