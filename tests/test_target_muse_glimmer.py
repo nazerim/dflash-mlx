@@ -58,6 +58,30 @@ class TestModule:
         ] * 2
         assert caches[0].max_size == 8
 
+    def test_centered_rms_norm_preserves_transformers_fp32_order(self):
+        # Mirrors the vendored mlx-vlm port (PR #1838 commit edfb0ef1): the
+        # centered scale is applied in FP32 before the single downcast, so
+        # verify logits keep matching serving logits bit-for-bit.
+        from dflash_mlx.models.muse_glimmer import CenteredRMSNorm
+
+        norm = CenteredRMSNorm(4, eps=1e-6)
+        norm.weight = (mx.arange(4, dtype=mx.float32) * 0.031 - 0.2).astype(
+            mx.bfloat16
+        )
+        inputs = (
+            (mx.arange(4, dtype=mx.float32) * 0.37 - 1.13)
+            .reshape(1, 4)
+            .astype(mx.bfloat16)
+        )
+
+        inputs32 = inputs.astype(mx.float32)
+        variance = mx.mean(mx.square(inputs32), axis=-1, keepdims=True)
+        expected = inputs32 * mx.rsqrt(variance + 1e-6)
+        expected = expected * (1.0 + norm.weight.astype(mx.float32))
+        expected = expected.astype(mx.bfloat16)
+
+        assert bool(mx.array_equal(norm(inputs), expected))
+
     def test_logits_tail_matches_call(self):
         model = _tiny_model()
         ids = mx.array([[1, 2, 3]])
