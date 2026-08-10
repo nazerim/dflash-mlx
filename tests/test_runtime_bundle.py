@@ -27,6 +27,7 @@ EXPECTED_DRAFT_REGISTRY = {
     "Qwen3-8B": "z-lab/Qwen3-8B-DFlash-b16",
     "gemma-4-31b-it": "z-lab/gemma-4-31B-it-DFlash",
     "gemma-4-26b-a4b-it": "z-lab/gemma-4-26B-A4B-it-DFlash",
+    "Muse-Glimmer-30B": "meta-models/Muse-Glimmer-30B-assistant",
 }
 
 

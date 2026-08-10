@@ -115,6 +115,7 @@ class TargetOps(Protocol):
 TARGET_BACKENDS = [
     "dflash_mlx.engine.target_qwen_gdn:QwenGdnTargetOps",
     "dflash_mlx.engine.target_gemma4:Gemma4TargetOps",
+    "dflash_mlx.engine.target_muse_glimmer:MuseGlimmerTargetOps",
 ]
 
 def _load_backend_class(path: str) -> type[TargetOps]:
