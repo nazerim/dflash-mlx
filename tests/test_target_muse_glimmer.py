@@ -85,6 +85,28 @@ class TestModule:
             "lm_head.weight",
         }
 
+    def test_sanitize_handles_mlx_vlm_artifact_layout(self):
+        # oMLX oQ artifacts are saved in the mlx-vlm runtime layout
+        # (language_model.model.* / language_model.lm_head.* / vision_*),
+        # including quantized suffixes.
+        model = _tiny_model()
+        weights = {
+            "language_model.model.layers.0.self_attn.q_proj.weight": mx.zeros((1,)),
+            "language_model.model.layers.0.self_attn.q_proj.scales": mx.zeros((1,)),
+            "language_model.model.embed_tokens.weight": mx.zeros((1,)),
+            "language_model.lm_head.weight": mx.zeros((1,)),
+            "vision_tower.ln_pre.weight": mx.zeros((1,)),
+            "vision_adapter.fc1.weight": mx.zeros((1,)),
+            "vision_projection.weight": mx.zeros((1,)),
+        }
+        sanitized = model.sanitize(weights)
+        assert set(sanitized) == {
+            "model.layers.0.self_attn.q_proj.weight",
+            "model.layers.0.self_attn.q_proj.scales",
+            "model.embed_tokens.weight",
+            "lm_head.weight",
+        }
+
     def test_register_yields_to_existing_module(self):
         name = "mlx_lm.models.muse_glimmer"
         saved = sys.modules.pop(name, None)

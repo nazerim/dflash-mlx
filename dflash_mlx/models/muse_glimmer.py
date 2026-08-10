@@ -367,6 +367,10 @@ class Model(nn.Module):
         ]
 
     def sanitize(self, weights: dict[str, mx.array]) -> dict[str, mx.array]:
+        # Two checkpoint layouts exist: the original HF export
+        # (model.language_model.* / model.vision_* / lm_head.*) and
+        # mlx-vlm-sanitized artifacts such as oMLX oQ outputs
+        # (language_model.model.* / language_model.lm_head.* / vision_*).
         sanitized = {}
         for key, value in weights.items():
             if "rotary_emb.inv_freq" in key:
@@ -376,11 +380,18 @@ class Model(nn.Module):
                     "model.vision_tower.",
                     "model.vision_adapter.",
                     "model.vision_projection.",
+                    "vision_tower.",
+                    "vision_adapter.",
+                    "vision_projection.",
                 )
             ):
                 continue
             if key.startswith("model.language_model."):
                 key = key.replace("model.language_model.", "model.", 1)
+            elif key.startswith("language_model.lm_head."):
+                key = key.replace("language_model.", "", 1)
+            elif key.startswith("language_model.model."):
+                key = key.replace("language_model.", "", 1)
             sanitized[key] = value
         return sanitized
 
