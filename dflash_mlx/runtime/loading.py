@@ -49,8 +49,26 @@ def resolve_model_ref(model_ref: str | Path | None, *, kind: str) -> str:
     raise ValueError(f"{kind} model reference is required")
 
 
+def _register_bundled_target_modules() -> None:
+    """Register target model modules mlx-lm does not ship yet.
+
+    Each register hook is idempotent and yields to a real upstream
+    ``mlx_lm.models.<name>`` module once one exists.
+    """
+    from dflash_mlx.models.muse_glimmer import register_into_mlx_lm
+
+    register_into_mlx_lm()
+
+
 def _get_dflash_model_classes(config: dict[str, Any]):
-    del config
+    from dflash_mlx.models.muse_glimmer_draft import (
+        MuseGlimmerDraftModel,
+        MuseGlimmerDraftModelArgs,
+        is_muse_glimmer_draft_config,
+    )
+
+    if is_muse_glimmer_draft_config(config):
+        return MuseGlimmerDraftModel, MuseGlimmerDraftModelArgs
     return DFlashDraftModel, DFlashDraftModelArgs
 
 
@@ -180,6 +198,7 @@ def load_target_bundle(
     verify_config: VerifyConfig | None = None,
 ) -> LoadedTargetBundle:
     resolved_ref = resolve_model_ref(model_ref, kind="target")
+    _register_bundled_target_modules()
     model, tokenizer, config = load(resolved_ref, lazy=lazy, return_config=True)
     target_ops = resolve_target_ops(model)
     target_family = target_ops.family(model)

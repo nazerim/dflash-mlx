@@ -59,6 +59,12 @@ MODEL_SUPPORT_SPECS: tuple[ModelSupportSpec, ...] = (
         "gemma4_swa",
         W4_DEFAULTS,
     ),
+    ModelSupportSpec(
+        ("Muse-Glimmer-30B",),
+        "meta-models/Muse-Glimmer-30B-assistant",
+        "muse_glimmer_swa",
+        W4_DEFAULTS,
+    ),
 )
 
 DRAFT_REGISTRY: dict[str, str] = {
