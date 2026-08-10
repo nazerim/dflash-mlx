@@ -80,6 +80,25 @@ class ModelArgs(BaseModelArgs):
 
     @classmethod
     def from_dict(cls, params: dict[str, Any]) -> "ModelArgs":
+        # mlx-vlm-sanitized artifacts (oMLX oQ outputs) carry per-layer
+        # quantization overrides keyed by their runtime paths
+        # (language_model.model.* / language_model.lm_head.*). mlx-lm's
+        # load_model resolves overrides against THIS module's paths
+        # (model.* / lm_head.*) on the same config dict from_dict receives,
+        # so translate the keys in place — otherwise e.g. an 8-bit
+        # embed_tokens override is missed and the 4-bit global config
+        # fails strict loading with a packed-shape mismatch.
+        for quant_key in ("quantization", "quantization_config"):
+            overrides = params.get(quant_key)
+            if not isinstance(overrides, dict):
+                continue
+            for key in [k for k in overrides if k.startswith("language_model.")]:
+                if key.startswith("language_model.model."):
+                    new_key = key.replace("language_model.model.", "model.", 1)
+                else:
+                    new_key = key.replace("language_model.", "", 1)
+                overrides[new_key] = overrides.pop(key)
+
         # VLM checkpoints nest the backbone under text_config; flatten it
         # (nested values win over top-level ones like the VLM's own
         # eos/bos ids, which do not appear in the annotations anyway).

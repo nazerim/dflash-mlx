@@ -131,6 +131,28 @@ class TestModule:
             if saved is not None:
                 sys.modules[name] = saved
 
+    def test_from_dict_translates_quant_override_paths(self):
+        # oQ artifact configs key per-layer overrides by mlx-vlm runtime
+        # paths; mlx-lm's class_predicate resolves them against this
+        # module's paths on the same config dict.
+        config = {
+            "model_type": "muse_glimmer",
+            "text_config": {"model_type": "muse_glimmer_text"},
+            "quantization": {
+                "group_size": 64,
+                "bits": 4,
+                "mode": "affine",
+                "language_model.model.embed_tokens": {"group_size": 64, "bits": 8},
+                "language_model.lm_head": {"group_size": 64, "bits": 6},
+            },
+        }
+        ModelArgs.from_dict(config)
+        overrides = config["quantization"]
+        assert overrides["model.embed_tokens"] == {"group_size": 64, "bits": 8}
+        assert overrides["lm_head"] == {"group_size": 64, "bits": 6}
+        assert "language_model.model.embed_tokens" not in overrides
+        assert overrides["bits"] == 4
+
     @pytest.mark.skipif(
         not _CHECKPOINT.exists(), reason="Muse Glimmer checkpoint not available"
     )
