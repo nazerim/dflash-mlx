@@ -243,7 +243,11 @@ class Attention(nn.Module):
         keys = self.k_proj(x).reshape(batch, length, self.n_kv_heads, self.head_dim)
         values = self.v_proj(x).reshape(batch, length, self.n_kv_heads, self.head_dim)
 
-        queries = (self.qk_norm(queries) * self.qk_scale_factor).transpose(0, 2, 1, 3)
+        queries = self.qk_norm(queries)
+        queries = (queries.astype(mx.float32) * self.qk_scale_factor).astype(
+            queries.dtype
+        )
+        queries = queries.transpose(0, 2, 1, 3)
         keys = self.qk_norm(keys).transpose(0, 2, 1, 3)
         values = values.transpose(0, 2, 1, 3)
 
