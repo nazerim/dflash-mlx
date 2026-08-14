@@ -66,14 +66,16 @@ class MuseGlimmerTargetOps:
         return "muse_glimmer_swa"
 
     def capabilities_for(self, target_model: Any) -> TargetCapabilities:
-        # Conservative bring-up surface: snapshots and verify linears stay
-        # off until they get muse-specific round-trip coverage.
+        # Snapshot round-trip coverage landed with
+        # test_snapshot_round_trip_matches_fresh_continuation (mixed
+        # sliding/full caches, rotating ring index, offsets). Verify
+        # linears stay off (no muse-specific linear-cache coverage).
         return TargetCapabilities(
             supports_dflash=True,
             supports_recurrent_rollback=False,
             supports_kv_trim=True,
-            supports_prefix_snapshot=False,
-            supports_rotating_cache_snapshot=False,
+            supports_prefix_snapshot=True,
+            supports_rotating_cache_snapshot=True,
             supports_shared_kv=False,
             supports_target_hidden_capture=True,
             supports_verify_linear=False,

@@ -203,7 +203,106 @@ class TestTargetOps:
         caps = ops.capabilities_for(model)
         assert caps.supports_dflash
         assert caps.supports_kv_trim
-        assert not caps.supports_prefix_snapshot
+        assert caps.supports_prefix_snapshot
+
+    def test_snapshot_round_trip_matches_fresh_continuation(self):
+        """A prefill snapshot hydrates back to the same continuation logits.
+
+        Muse Glimmer mixes sliding-window RotatingKVCache layers with full
+        KVCache layers (and NoPE layers), so the generic serialize/hydrate
+        machinery must reproduce both cache kinds exactly: KV contents,
+        rotating ring index, and absolute offsets.
+        """
+        from dflash_mlx.cache.codecs import (
+            build_snapshot,
+            hydrate_target_cache,
+            serialize_target_cache,
+        )
+        from dflash_mlx.cache.fingerprints import DFlashPrefixKey
+
+        model = _tiny_model(num_layers=8, sliding_window=8)
+        ops = MuseGlimmerTargetOps()
+        prefix_ids = mx.array([[(i * 7) % 60 for i in range(40)]])
+        continuation = mx.array([[(i * 3 + 1) % 60 for i in range(8)]])
+
+        # Prefill the prefix, then snapshot the cache.
+        prefix_cache = model.make_cache()
+        _, _ = ops.forward_with_hidden_capture(
+            model,
+            input_ids=prefix_ids,
+            cache=prefix_cache,
+            capture_layer_ids={0},
+            logits_last_only=True,
+        )
+        fa, gdn = serialize_target_cache(prefix_cache)
+        snapshot = build_snapshot(
+            token_ids=[int(t) for t in prefix_ids[0]],
+            target_cache=prefix_cache,
+            target_hidden=mx.zeros((1, 40, model.args.hidden_size)),
+            last_logits=None,
+            key=DFlashPrefixKey(
+                target_model_id="test/muse-v1",
+                draft_model_id="test/draft-v1",
+                capture_layer_ids=(0,),
+                draft_sink_size=16,
+                draft_window_size=2048,
+                template_hash="a" * 64,
+                prompt_policy_hash="b" * 64,
+            ),
+            kind="prefill",
+            allow_full_attention_context=False,
+        )
+
+        # Hydrate a fresh cache from the snapshot.
+        hydrated = hydrate_target_cache(snapshot, model.make_cache())
+        ref_cache = model.make_cache()
+        _, _ = ops.forward_with_hidden_capture(
+            model,
+            input_ids=prefix_ids,
+            cache=ref_cache,
+            capture_layer_ids={0},
+            logits_last_only=True,
+        )
+
+        # Continue both caches: hydrated vs freshly prefilled must agree.
+        snap_logits, _ = ops.forward_with_hidden_capture(
+            model,
+            input_ids=continuation,
+            cache=hydrated,
+            capture_layer_ids={0},
+            logits_last_only=True,
+        )
+        ref_logits, _ = ops.forward_with_hidden_capture(
+            model,
+            input_ids=continuation,
+            cache=ref_cache,
+            capture_layer_ids={0},
+            logits_last_only=True,
+        )
+        mx.eval(snap_logits, ref_logits)
+        assert bool(mx.allclose(snap_logits, ref_logits, atol=1e-5))
+
+        # The rotating ring index and offsets must survive the trip. KVCache
+        # preallocates in 256-token steps, so compare only the filled
+        # positions (first ``offset``) rather than raw capacity.
+        for hc, rc in zip(hydrated, ref_cache):
+            if isinstance(rc, RotatingKVCache):
+                assert hc.offset == rc.offset
+                assert hc._idx == rc._idx
+                assert bool(
+                    mx.all(hc._temporal_order(hc.keys) == rc._temporal_order(rc.keys))
+                )
+            elif isinstance(rc, KVCache):
+                assert hc.offset == rc.offset
+                assert bool(
+                    mx.all(hc.keys[:, :, : hc.offset, :] == rc.keys[:, :, : rc.offset, :])
+                )
+                assert bool(
+                    mx.all(
+                        hc.values[:, :, : hc.offset, :]
+                        == rc.values[:, :, : rc.offset, :]
+                    )
+                )
 
     def test_make_cache_rejects_unsupported_options(self):
         model = _tiny_model()
