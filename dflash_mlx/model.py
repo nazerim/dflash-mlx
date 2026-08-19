@@ -991,7 +991,8 @@ class DFlash2DraftModel(DFlashDraftModel):
     def sanitize(self, weights: dict[str, mx.array]) -> dict[str, mx.array]:
         for name in ("predecessor_codebook", "successor_codebook"):
             key = f"candidate_selector.{name}"
-            weights[f"{key}.weight"] = weights.pop(key)
+            if key in weights:
+                weights[f"{key}.weight"] = weights.pop(key)
         return weights
 
     def select_candidates(
