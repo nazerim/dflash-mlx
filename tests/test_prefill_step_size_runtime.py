@@ -400,6 +400,7 @@ def test_dflash2_sampling_runs_sparse_rejection_path_end_to_end():
             temperature=1.0,
             top_p=0.95,
             top_k=1,
+            min_p=0.05,
             prompt_tokens_override=[1, 2],
             runtime_context=_runtime_context(),
         )

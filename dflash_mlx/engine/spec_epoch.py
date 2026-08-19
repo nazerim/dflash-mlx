@@ -132,6 +132,7 @@ class _SessionRequest:
     temperature: float = 0.0
     top_p: float = 1.0
     top_k: int = 0
+    min_p: float = 0.0
     prefix_snapshot: Optional[DFlashPrefixSnapshot] = None
     snapshot_service: Optional[SnapshotService] = None
     stable_prefix_len: Optional[int] = None
@@ -166,6 +167,7 @@ class _SessionRequest:
         temperature: float = 0.0,
         top_p: float = 1.0,
         top_k: int = 0,
+        min_p: float = 0.0,
     ) -> "_SessionRequest":
         return cls(
             prompt_tokens=tuple(int(token) for token in prompt_tokens),
@@ -180,6 +182,7 @@ class _SessionRequest:
             temperature=float(temperature),
             top_p=float(top_p),
             top_k=int(top_k),
+            min_p=float(min_p),
             prefix_snapshot=prefix_snapshot,
             snapshot_service=snapshot_service,
             stable_prefix_len=stable_prefix_len,
@@ -1108,6 +1111,7 @@ class SpeculativeSession:
             request.temperature,
             request.top_p,
             request.top_k,
+            request.min_p,
             suppress_token_mask,
         ).reshape(-1)
         prefill_tokens_restored = max(0, min(int(snap_prefix_len), int(prompt_len)))
@@ -2084,6 +2088,7 @@ class SpeculativeSession:
                     temperature=request.temperature,
                     top_p=request.top_p,
                     top_k=request.top_k,
+                    min_p=request.min_p,
                 )
             return draft_backend.draft_greedy(**common), None, None
 
@@ -2317,6 +2322,7 @@ class SpeculativeSession:
                     request.temperature,
                     request.top_p,
                     request.top_k,
+                    request.min_p,
                     suppress_token_mask,
                 )
                 if verify_id_count > 1:
@@ -2912,6 +2918,7 @@ def stream_dflash_generate_impl(
     temperature: float = 0.0,
     top_p: float = 1.0,
     top_k: int = 0,
+    min_p: float = 0.0,
     prompt_tokens_override: Optional[list[int]] = None,
     prompt_token_positions: Optional[list[int]] = None,
     quantize_kv_cache: bool = False,
@@ -2967,6 +2974,7 @@ def stream_dflash_generate_impl(
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
+            min_p=min_p,
             prompt_tokens_override=prompt_tokens,
             quantize_kv_cache=quantize_kv_cache,
             fallback_reason=fallback_reason,
@@ -2981,6 +2989,7 @@ def stream_dflash_generate_impl(
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
+        min_p=min_p,
         prefix_snapshot=prefix_snapshot,
         snapshot_service=snapshot_service,
         stable_prefix_len=stable_prefix_len,

@@ -170,6 +170,7 @@ class ServerRuntime:
             temperature=float(getattr(args, "temp", 0.0)),
             top_p=float(getattr(args, "top_p", 1.0)),
             top_k=int(getattr(args, "top_k", 0)),
+            min_p=float(getattr(args, "min_p", 0.0)),
             prompt_tokens_override=prepared.prompt,
             prefix_snapshot=prefix_flow.snapshot,
             snapshot_service=prefix_flow.snapshot_service,

@@ -132,6 +132,20 @@ def test_dflash2_loader_accepts_bare_codebook_keys(tmp_path):
     assert model.candidate_selector.successor_codebook.weight.shape == (4, 1)
 
 
+def test_dflash2_loader_accepts_canonical_weight_keys(tmp_path):
+    args = _args()
+    weights = dict(tree_flatten(DFlash2DraftModel(args).parameters()))
+    mx.save_safetensors(str(tmp_path / "model.safetensors"), weights)
+    (tmp_path / "config.json").write_text(
+        json.dumps({**args.__dict__, "architectures": ["DFlash2DraftModel"]})
+    )
+
+    model, _ = load_draft_bundle(tmp_path, lazy=False)
+
+    assert model.candidate_selector.predecessor_codebook.weight.shape == (4, 1)
+    assert model.candidate_selector.successor_codebook.weight.shape == (4, 1)
+
+
 def test_noncausal_sliding_mask_sees_whole_block_and_windowed_context():
     attention = DFlashAttention(_args(), 0)
     mask = attention._attention_mask(
@@ -231,3 +245,23 @@ def test_sampling_filters_are_normalized_and_composable():
         top_k=2,
     )
     assert mx.allclose(probs, mx.array([[1.0, 0.0, 0.0, 0.0]]))
+
+
+def test_min_p_drops_tokens_below_top_probability_fraction():
+    probs = sampling_probs(
+        mx.array([[4.0, 3.0, 2.0, 1.0]]),
+        temperature=1.0,
+        min_p=0.3,
+    )
+    assert mx.allclose(probs, mx.array([[0.731059, 0.268941, 0.0, 0.0]]))
+
+
+def test_filters_apply_before_temperature():
+    # A sharpening temperature must not change which tokens survive top-p:
+    # the filter sees the untempered distribution (mlx-lm make_sampler order).
+    probs = sampling_probs(
+        mx.array([[2.0, 1.0, 0.0]]),
+        temperature=0.25,
+        top_p=0.7,
+    )
+    assert mx.allclose(probs, mx.array([[0.9820138, 0.0179862, 0.0]]))

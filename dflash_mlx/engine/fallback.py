@@ -48,6 +48,7 @@ def stream_baseline_generate(
     temperature: float = 0.0,
     top_p: float = 1.0,
     top_k: int = 0,
+    min_p: float = 0.0,
     prompt_tokens_override: Optional[list[int]] = None,
     quantize_kv_cache: bool = False,
     fallback_reason: Optional[str] = None,
@@ -79,6 +80,7 @@ def stream_baseline_generate(
             temperature,
             top_p,
             top_k,
+            min_p,
             suppress_token_mask,
         ).item()
     )
@@ -119,6 +121,7 @@ def stream_baseline_generate(
                 temperature,
                 top_p,
                 top_k,
+                min_p,
                 suppress_token_mask,
             ).item()
         )

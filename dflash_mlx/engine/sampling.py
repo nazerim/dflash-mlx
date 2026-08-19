@@ -60,35 +60,42 @@ def sampling_probs(
     temperature: float,
     top_p: float = 1.0,
     top_k: int = 0,
+    min_p: float = 0.0,
     suppress_token_mask: mx.array | None = None,
 ) -> mx.array:
+    """Filtered sampling distribution matching mlx-lm sampler semantics.
+
+    Filters run on the untempered distribution in mlx-lm's make_sampler order
+    (top-p, then min-p, then top-k); temperature only scales the final softmax
+    over the surviving tokens.
+    """
     if temperature <= 0:
         raise ValueError("sampling_probs requires temperature > 0")
-    scores = logits.astype(mx.float32) / float(temperature)
+    scores = logits.astype(mx.float32)
     if suppress_token_mask is not None:
         scores = mx.where(suppress_token_mask, -mx.inf, scores)
     vocab_size = int(scores.shape[-1])
-    if 0 < int(top_k) < vocab_size:
-        indices = mx.argpartition(-scores, int(top_k) - 1, axis=-1)[..., : int(top_k)]
-        scores = mx.take_along_axis(scores, indices, axis=-1)
-    else:
-        indices = None
-    probs = mx.softmax(scores, axis=-1)
-    if top_p < 1.0:
-        order = mx.argsort(-probs, axis=-1)
-        sorted_probs = mx.take_along_axis(probs, order, axis=-1)
-        keep = mx.cumsum(sorted_probs, axis=-1) - sorted_probs < float(top_p)
-        sorted_probs = mx.where(keep, sorted_probs, 0)
-        probs = mx.put_along_axis(mx.zeros_like(probs), order, sorted_probs, axis=-1)
-        probs = probs / mx.sum(probs, axis=-1, keepdims=True)
-    if indices is not None:
-        probs = mx.put_along_axis(
-            mx.zeros(logits.shape, dtype=probs.dtype),
-            indices,
-            probs,
+    neg_inf = mx.array(-mx.inf, dtype=scores.dtype)
+    if 0.0 < float(top_p) < 1.0:
+        probs = mx.softmax(scores, axis=-1)
+        order = mx.argsort(probs, axis=-1)
+        cumulative = mx.cumsum(mx.take_along_axis(probs, order, axis=-1), axis=-1)
+        ranks = mx.put_along_axis(
+            mx.zeros_like(order),
+            order,
+            mx.broadcast_to(mx.arange(vocab_size, dtype=order.dtype), order.shape),
             axis=-1,
         )
-    return probs
+        cumulative = mx.take_along_axis(cumulative, ranks, axis=-1)
+        scores = mx.where(cumulative > 1.0 - float(top_p), scores, neg_inf)
+    if float(min_p) > 0.0:
+        probs = mx.softmax(scores, axis=-1)
+        floor = mx.max(probs, axis=-1, keepdims=True) * float(min_p)
+        scores = mx.where(probs >= floor, scores, neg_inf)
+    if 0 < int(top_k) < vocab_size:
+        drop = mx.argpartition(-scores, int(top_k) - 1, axis=-1)[..., int(top_k) :]
+        scores = mx.put_along_axis(scores, drop, neg_inf, axis=-1)
+    return mx.softmax(scores / float(temperature), axis=-1)
 
 
 def sample_probs(probs: mx.array) -> mx.array:
@@ -100,12 +107,13 @@ def sample_logits(
     temperature: float,
     top_p: float = 1.0,
     top_k: int = 0,
+    min_p: float = 0.0,
     suppress_token_mask: mx.array | None = None,
 ) -> mx.array:
     if temperature <= 0:
         return greedy_tokens_with_mask(logits, suppress_token_mask)
     return sample_probs(
-        sampling_probs(logits, temperature, top_p, top_k, suppress_token_mask)
+        sampling_probs(logits, temperature, top_p, top_k, min_p, suppress_token_mask)
     )
 
 

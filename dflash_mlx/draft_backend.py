@@ -76,6 +76,7 @@ class DraftBackend(Protocol):
         temperature: float,
         top_p: float,
         top_k: int,
+        min_p: float,
         async_launch: bool,
     ) -> tuple[mx.array, mx.array, Optional[mx.array]]:
         ...
@@ -252,6 +253,7 @@ class EagerDraftBackend:
         temperature: float,
         top_p: float,
         top_k: int,
+        min_p: float,
         async_launch: bool,
     ) -> tuple[mx.array, mx.array, Optional[mx.array]]:
         draft_hidden, draft_logits = self._draft_block_hidden_logits(
@@ -279,6 +281,7 @@ class EagerDraftBackend:
                 temperature,
                 top_p,
                 top_k,
+                min_p,
             )
             drafted = sample_probs(probs)
             indices = None
