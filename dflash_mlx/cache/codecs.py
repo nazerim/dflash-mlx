@@ -111,9 +111,15 @@ def _build_target_hidden_chunks(
         full = grab(_target_hidden_slice(target_hidden, 0, total_len))
         assert full is not None
         return (full,), ((0, total_len),), total_len
-    sink_chunk = grab(_target_hidden_slice(target_hidden, 0, sink))
     tail_chunk = grab(_target_hidden_slice(target_hidden, tail_start, total_len))
-    assert sink_chunk is not None and tail_chunk is not None
+    assert tail_chunk is not None
+    if sink == 0:
+        # A zero-width sink chunk carries no data and cannot round-trip
+        # through safetensors (mx.save_safetensors rejects empty arrays),
+        # which kills every L2 snapshot write when the sink size is 0.
+        return (tail_chunk,), ((tail_start, total_len),), total_len
+    sink_chunk = grab(_target_hidden_slice(target_hidden, 0, sink))
+    assert sink_chunk is not None
     return (
         (sink_chunk, tail_chunk),
         ((0, sink), (tail_start, total_len)),

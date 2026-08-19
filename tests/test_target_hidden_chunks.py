@@ -127,3 +127,25 @@ def test_partial_hit_keeps_existing_dense_restore_behavior():
     restored = store.hydrate_from_snapshot(_snapshot(12), snap_prefix_len=12)
     assert isinstance(restored, mx.array)
     assert restored.shape == (1, 14, 3)
+
+
+def test_zero_sink_trim_emits_no_empty_chunk():
+    from dflash_mlx.cache.codecs import _build_target_hidden_chunks
+
+    hidden = mx.arange(24, dtype=mx.float32).reshape(1, 12, 2)
+    chunks, spans, total = _build_target_hidden_chunks(
+        hidden,
+        draft_model=None,
+        draft_sink_size=0,
+        draft_window_size=4,
+    )
+    assert total == 12
+    assert spans == ((8, 12),)
+    assert all(int(chunk.shape[1]) > 0 for chunk in chunks)
+    # The safetensors codec must accept every chunk (empty arrays are rejected).
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".safetensors") as f:
+        mx.save_safetensors(
+            f.name, {str(i): chunk for i, chunk in enumerate(chunks)}
+        )
