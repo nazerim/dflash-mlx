@@ -450,6 +450,8 @@ def test_server_runtime_routes_tool_chat_generation_snapshot_policy(monkeypatch)
         request_type="chat",
         messages=[{"role": "user", "content": "hi"}],
         tools=[{"type": "function"}],
+        repetition_penalty=1.2,
+        repetition_context_size=128,
     )
 
     runtime.serve_dflash_request(
@@ -480,6 +482,8 @@ def test_server_runtime_routes_tool_chat_generation_snapshot_policy(monkeypatch)
     assert captured["snapshot_service"] is prefix_flow.snapshot_service
     assert captured["stable_prefix_len"] == 3
     assert captured["prefix_cache_active"] is True
+    assert captured["repetition_penalty"] == 1.2
+    assert captured["repetition_context_size"] == 128
 
 
 def test_memory_waterfall_events_are_enriched_with_prefix_cache_memory():

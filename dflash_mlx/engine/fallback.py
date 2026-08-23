@@ -17,6 +17,7 @@ from dflash_mlx.engine.events import (
     TokenEvent,
 )
 from dflash_mlx.engine.sampling import (
+    apply_repetition_penalty,
     build_suppress_token_mask,
     prepare_prompt_tokens,
     sample_logits,
@@ -49,6 +50,8 @@ def stream_baseline_generate(
     top_p: float = 1.0,
     top_k: int = 0,
     min_p: float = 0.0,
+    repetition_penalty: float = 0.0,
+    repetition_context_size: int = 20,
     prompt_tokens_override: Optional[list[int]] = None,
     quantize_kv_cache: bool = False,
     fallback_reason: Optional[str] = None,
@@ -74,9 +77,15 @@ def stream_baseline_generate(
     mx.eval(logits)
     prefill_ns = time.perf_counter_ns() - prefill_start_ns
     suppress_token_mask = build_suppress_token_mask(int(logits.shape[-1]), suppress_token_ids)
+    sampling_logits = apply_repetition_penalty(
+        logits[:, -1, :],
+        [prompt_tokens],
+        penalty=repetition_penalty,
+        context_size=repetition_context_size,
+    )
     next_token = int(
         sample_logits(
-            logits[:, -1, :],
+            sampling_logits,
             temperature,
             top_p,
             top_k,
@@ -115,9 +124,15 @@ def stream_baseline_generate(
             break
         token_array = mx.array([[next_token]], dtype=mx.uint32)
         logits = target_model(token_array, cache=cache)
+        sampling_logits = apply_repetition_penalty(
+            logits[:, -1, :],
+            [[*prompt_tokens, *generated_tokens]],
+            penalty=repetition_penalty,
+            context_size=repetition_context_size,
+        )
         next_token = int(
             sample_logits(
-                logits[:, -1, :],
+                sampling_logits,
                 temperature,
                 top_p,
                 top_k,

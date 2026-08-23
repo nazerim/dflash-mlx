@@ -412,6 +412,36 @@ def test_dflash2_sampling_runs_sparse_rejection_path_end_to_end():
     assert summary.generation_tokens == 5
 
 
+def test_repetition_context_size_changes_prefill_sample_end_to_end():
+    class RepetitionTargetOps(_FakeTargetOps):
+        def forward_with_hidden_capture(self, *args, **kwargs):
+            logits, hidden = super().forward_with_hidden_capture(*args, **kwargs)
+            logits[..., 3] = 2.0
+            logits[..., 4] = 1.5
+            return logits, hidden
+
+    prompt_tokens = [3, *([1] * 45)]
+
+    def generate(context_size: int) -> list[int]:
+        events = spec_epoch.stream_dflash_generate_impl(
+            target_model=object(),
+            target_ops=RepetitionTargetOps(),
+            tokenizer=object(),
+            draft_model=_draft_model(),
+            draft_backend=_FakeDraftBackend(),
+            prompt="unused",
+            max_new_tokens=1,
+            repetition_penalty=2.0,
+            repetition_context_size=context_size,
+            prompt_tokens_override=prompt_tokens,
+            runtime_context=_runtime_context(),
+        )
+        return [event.token_id for event in events if isinstance(event, TokenEvent)]
+
+    assert generate(20) == [3]
+    assert generate(128) == [4]
+
+
 def test_dflash_max_ctx_fallback_skips_session_request_materialization(monkeypatch):
     target_ops = _FakeTargetOps()
 

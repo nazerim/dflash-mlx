@@ -4,9 +4,62 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import mlx.core as mx
+from mlx_lm.sample_utils import make_repetition_penalty
+
+
+def build_repetition_histories(
+    prefix_tokens: Sequence[int],
+    candidate_rows: Sequence[Sequence[int]],
+) -> list[list[int]]:
+    """Build one causal token history for every candidate logits row."""
+    histories: list[list[int]] = []
+    prefix = [int(token) for token in prefix_tokens]
+    for candidate_row in candidate_rows:
+        history = list(prefix)
+        for token in candidate_row:
+            history.append(int(token))
+            histories.append(list(history))
+    return histories
+
+
+def apply_repetition_penalty(
+    logits: mx.array,
+    token_histories: Sequence[Sequence[int]],
+    *,
+    penalty: float,
+    context_size: int,
+) -> mx.array:
+    """Apply mlx-lm repetition penalty to each logits row's actual history."""
+    resolved_penalty = float(penalty)
+    if resolved_penalty in (0.0, 1.0):
+        return logits
+    resolved_context_size = int(context_size)
+    if resolved_context_size <= 0:
+        raise ValueError("repetition_context_size must be positive")
+
+    vocab_size = int(logits.shape[-1])
+    flat_logits = logits.reshape(-1, vocab_size)
+    if len(token_histories) != int(flat_logits.shape[0]):
+        raise ValueError(
+            "token history count must match the number of logits rows "
+            f"({len(token_histories)} != {int(flat_logits.shape[0])})"
+        )
+
+    processor = make_repetition_penalty(
+        resolved_penalty,
+        context_size=resolved_context_size,
+    )
+    adjusted_rows: list[mx.array] = []
+    for row_index, history in enumerate(token_histories):
+        row = flat_logits[row_index : row_index + 1] * 1
+        if history:
+            row = processor(mx.array(history, dtype=mx.uint32), row)
+        adjusted_rows.append(row)
+    return mx.concatenate(adjusted_rows, axis=0).reshape(logits.shape)
 
 
 def prepare_prompt_tokens(

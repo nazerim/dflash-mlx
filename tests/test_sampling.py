@@ -5,7 +5,58 @@ import math
 
 import mlx.core as mx
 
-from dflash_mlx.engine.sampling import greedy_tokens_with_mask, masked_topk_arrays
+from dflash_mlx.engine.sampling import (
+    apply_repetition_penalty,
+    build_repetition_histories,
+    greedy_tokens_with_mask,
+    masked_topk_arrays,
+)
+
+
+def test_repetition_penalty_respects_extended_context_size():
+    history = [3, *range(10, 55)]
+    logits = mx.array([[0.0, 0.0, 0.0, -2.0, 0.0]])
+
+    default_window = apply_repetition_penalty(
+        logits,
+        [history],
+        penalty=1.5,
+        context_size=20,
+    )
+    extended_window = apply_repetition_penalty(
+        logits,
+        [history],
+        penalty=1.5,
+        context_size=128,
+    )
+
+    assert default_window[0, 3].item() == -2.0
+    assert extended_window[0, 3].item() == -3.0
+
+
+def test_repetition_histories_are_causal_within_verify_block():
+    histories = build_repetition_histories([9], [[3, 4]])
+    logits = mx.array(
+        [
+            [
+                [0.0, 0.0, 0.0, -2.0, -2.0],
+                [0.0, 0.0, 0.0, -2.0, -2.0],
+            ]
+        ]
+    )
+
+    adjusted = apply_repetition_penalty(
+        logits,
+        histories,
+        penalty=1.5,
+        context_size=20,
+    )
+
+    assert histories == [[9, 3], [9, 3, 4]]
+    assert adjusted[0, 0, 3].item() == -3.0
+    assert adjusted[0, 0, 4].item() == -2.0
+    assert adjusted[0, 1, 3].item() == -3.0
+    assert adjusted[0, 1, 4].item() == -3.0
 
 
 def test_masked_topk_arrays_orders_masks_and_matches_greedy():

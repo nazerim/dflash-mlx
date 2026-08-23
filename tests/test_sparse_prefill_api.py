@@ -95,11 +95,15 @@ class TestPublicApiSignature:
         sig = inspect.signature(stream_dflash_generate)
         assert "prompt_token_positions" in sig.parameters
         assert sig.parameters["prompt_token_positions"].default is None
+        assert sig.parameters["repetition_penalty"].default == 0.0
+        assert sig.parameters["repetition_context_size"].default == 20
 
     def test_impl_accepts_prompt_token_positions(self):
         sig = inspect.signature(stream_dflash_generate_impl)
         assert "prompt_token_positions" in sig.parameters
         assert sig.parameters["prompt_token_positions"].default is None
+        assert sig.parameters["repetition_penalty"].default == 0.0
+        assert sig.parameters["repetition_context_size"].default == 20
 
 
 class _FakeTargetOps:

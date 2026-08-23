@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import heapq
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -15,6 +16,8 @@ import mlx.core as mx
 from dflash_mlx.draft_backend import _astype_if_needed, _draft_compute_dtype
 from dflash_mlx.engine.acceptance import match_acceptance_length
 from dflash_mlx.engine.sampling import (
+    apply_repetition_penalty,
+    build_repetition_histories,
     eval_logits_and_captured,
     greedy_tokens_with_mask,
 )
@@ -582,6 +585,9 @@ def verify_candidates_batch(
     candidate_sources: list[str],
     suppress_token_mask: mx.array | None,
     prefix_len: int,
+    repetition_prefix_tokens: Sequence[int] = (),
+    repetition_penalty: float = 0.0,
+    repetition_context_size: int = 20,
 ) -> tuple[list[DDTreeCandidateResult], float]:
     if not candidate_ids:
         raise ValueError("candidate_ids must not be empty")
@@ -597,7 +603,19 @@ def verify_candidates_batch(
         capture_layer_ids=capture_layer_ids,
     )
     eval_logits_and_captured(logits, hidden_states)
-    posterior = greedy_tokens_with_mask(logits, suppress_token_mask)
+    sampling_logits = logits
+    if float(repetition_penalty) not in (0.0, 1.0):
+        candidate_rows = [
+            [int(token_id) for token_id in candidate.tolist()]
+            for candidate in candidate_ids
+        ]
+        sampling_logits = apply_repetition_penalty(
+            logits,
+            build_repetition_histories(repetition_prefix_tokens, candidate_rows),
+            penalty=repetition_penalty,
+            context_size=repetition_context_size,
+        )
+    posterior = greedy_tokens_with_mask(sampling_logits, suppress_token_mask)
     mx.eval(posterior)
     verify_us = (time.perf_counter_ns() - verify_start) / 1_000.0
     results: list[DDTreeCandidateResult] = []

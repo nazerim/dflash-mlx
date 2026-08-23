@@ -36,6 +36,7 @@ from dflash_mlx.engine.ddtree import (
     candidate_token_ids as ddtree_candidate_token_ids,
     clone_cache_for_batch as ddtree_clone_cache_for_batch,
     copy_selected_cache as ddtree_copy_selected_cache,
+    flat_tree_path_token_ids,
     follow_verified_tree,
     restore_cache as ddtree_restore_cache,
     select_tree_slots as ddtree_select_tree_slots,
@@ -53,6 +54,8 @@ from dflash_mlx.engine.sparse_rope import (
     switch_to_offset_adjusted_rope,
 )
 from dflash_mlx.engine.sampling import (
+    apply_repetition_penalty,
+    build_repetition_histories,
     build_suppress_token_mask,
     eval_logits_and_captured,
     greedy_tokens_with_mask,
@@ -133,6 +136,8 @@ class _SessionRequest:
     top_p: float = 1.0
     top_k: int = 0
     min_p: float = 0.0
+    repetition_penalty: float = 0.0
+    repetition_context_size: int = 20
     prefix_snapshot: Optional[DFlashPrefixSnapshot] = None
     snapshot_service: Optional[SnapshotService] = None
     stable_prefix_len: Optional[int] = None
@@ -168,6 +173,8 @@ class _SessionRequest:
         top_p: float = 1.0,
         top_k: int = 0,
         min_p: float = 0.0,
+        repetition_penalty: float = 0.0,
+        repetition_context_size: int = 20,
     ) -> "_SessionRequest":
         return cls(
             prompt_tokens=tuple(int(token) for token in prompt_tokens),
@@ -183,6 +190,8 @@ class _SessionRequest:
             top_p=float(top_p),
             top_k=int(top_k),
             min_p=float(min_p),
+            repetition_penalty=float(repetition_penalty),
+            repetition_context_size=int(repetition_context_size),
             prefix_snapshot=prefix_snapshot,
             snapshot_service=snapshot_service,
             stable_prefix_len=stable_prefix_len,
@@ -197,6 +206,8 @@ class _SessionRequest:
         )
 
     def __post_init__(self) -> None:
+        if self.repetition_context_size <= 0:
+            raise ValueError("repetition_context_size must be positive")
         object.__setattr__(self, "prompt_len", len(self.prompt_tokens))
         self._validate_token_positions()
         object.__setattr__(
@@ -1106,8 +1117,14 @@ class SpeculativeSession:
             int(state.prefill_logits.shape[-1]),
             suppress_token_ids,
         )
-        state.staged_first = sample_logits(
+        prefill_sampling_logits = apply_repetition_penalty(
             state.prefill_logits[:, -1, :],
+            [request.prompt_tokens],
+            penalty=request.repetition_penalty,
+            context_size=request.repetition_context_size,
+        )
+        state.staged_first = sample_logits(
+            prefill_sampling_logits,
             request.temperature,
             request.top_p,
             request.top_k,
@@ -1445,7 +1462,29 @@ class SpeculativeSession:
                             capture_layer_ids=capture_layer_ids,
                         )
                         eval_logits_and_captured(logits, hidden_states)
-                        posterior = greedy_tokens_with_mask(logits, suppress_token_mask).squeeze(0)
+                        sampling_logits = logits
+                        if request.repetition_penalty not in (0.0, 1.0):
+                            repetition_prefix = [
+                                *request.prompt_tokens,
+                                *state.generated_token_ids,
+                            ]
+                            tree_histories = [
+                                [*repetition_prefix, *path]
+                                for path in flat_tree_path_token_ids(
+                                    tree,
+                                    root_token_id=int(current_staged_first.item()),
+                                )
+                            ]
+                            sampling_logits = apply_repetition_penalty(
+                                logits,
+                                tree_histories,
+                                penalty=request.repetition_penalty,
+                                context_size=request.repetition_context_size,
+                            )
+                        posterior = greedy_tokens_with_mask(
+                            sampling_logits,
+                            suppress_token_mask,
+                        ).squeeze(0)
                         mx.eval(posterior)
                         verify_cycle_ns = time.perf_counter_ns() - verify_start_ns
                         verify_ns_total += verify_cycle_ns
@@ -1723,6 +1762,12 @@ class SpeculativeSession:
                 candidate_sources=candidate_sources,
                 suppress_token_mask=suppress_token_mask,
                 prefix_len=state.start,
+                repetition_prefix_tokens=[
+                    *request.prompt_tokens,
+                    *state.generated_token_ids,
+                ],
+                repetition_penalty=request.repetition_penalty,
+                repetition_context_size=request.repetition_context_size,
             )
             verify_cycle_ns = time.perf_counter_ns() - verify_start_ns
             verify_ns_total += verify_cycle_ns
@@ -2299,26 +2344,43 @@ class SpeculativeSession:
                     yield evt
                     yield_pause.done(_pre_yield)
 
+            verify_token_ids_host: list[int] | None = None
+            verify_sampling_logits = verify_logits
+            if request.repetition_penalty not in (0.0, 1.0):
+                verify_token_ids_host = [
+                    int(token_id) for token_id in verify_token_ids.tolist()
+                ]
+                verify_sampling_logits = apply_repetition_penalty(
+                    verify_logits,
+                    build_repetition_histories(
+                        [*request.prompt_tokens, *state.generated_token_ids],
+                        [verify_token_ids_host],
+                    ),
+                    penalty=request.repetition_penalty,
+                    context_size=request.repetition_context_size,
+                )
             acceptance_start_ns = time.perf_counter_ns() if profile_cycles else 0
             posterior = None
             if request.temperature <= 0:
                 posterior = greedy_tokens_with_mask(
-                    verify_logits[0], suppress_token_mask
+                    verify_sampling_logits[0], suppress_token_mask
                 )
             if capture_logits:
                 posterior_top2_ids_arr, posterior_top2_logprobs_arr = (
                     masked_topk_arrays(
-                        verify_logits[0],
+                        verify_sampling_logits[0],
                         suppress_token_mask,
                         width=2,
                     )
                 )
             verify_id_count = int(verify_token_ids.shape[0])
             if request.temperature > 0:
-                verify_ids_host = [int(t) for t in verify_token_ids.tolist()]
+                verify_ids_host = verify_token_ids_host or [
+                    int(token_id) for token_id in verify_token_ids.tolist()
+                ]
                 posterior_host = []
                 target_probs = sampling_probs(
-                    verify_logits,
+                    verify_sampling_logits,
                     request.temperature,
                     request.top_p,
                     request.top_k,
@@ -2919,6 +2981,8 @@ def stream_dflash_generate_impl(
     top_p: float = 1.0,
     top_k: int = 0,
     min_p: float = 0.0,
+    repetition_penalty: float = 0.0,
+    repetition_context_size: int = 20,
     prompt_tokens_override: Optional[list[int]] = None,
     prompt_token_positions: Optional[list[int]] = None,
     quantize_kv_cache: bool = False,
@@ -2975,6 +3039,8 @@ def stream_dflash_generate_impl(
             top_p=top_p,
             top_k=top_k,
             min_p=min_p,
+            repetition_penalty=repetition_penalty,
+            repetition_context_size=repetition_context_size,
             prompt_tokens_override=prompt_tokens,
             quantize_kv_cache=quantize_kv_cache,
             fallback_reason=fallback_reason,
@@ -2990,6 +3056,8 @@ def stream_dflash_generate_impl(
         top_p=top_p,
         top_k=top_k,
         min_p=min_p,
+        repetition_penalty=repetition_penalty,
+        repetition_context_size=repetition_context_size,
         prefix_snapshot=prefix_snapshot,
         snapshot_service=snapshot_service,
         stable_prefix_len=stable_prefix_len,

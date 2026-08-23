@@ -29,6 +29,7 @@ from dflash_mlx.engine.ddtree import (
     select_tree_slots,
     snapshot_cache,
     top_ids_and_values_desc,
+    verify_candidates_batch,
 )
 from dflash_mlx.model import ContextOnlyDraftKVCache
 from dflash_mlx.recurrent_rollback_cache import RecurrentRollbackCache
@@ -169,6 +170,53 @@ def test_select_tree_slots_gathers_non_prefix_path_order():
 
     assert selected_list[0].shape == (1, 2, 1)
     assert selected_list[0].tolist() == [[[20], [22]]]
+
+
+def test_verify_candidates_applies_repetition_context_per_candidate():
+    class TargetOps:
+        def arm_rollback(self, *_args, **_kwargs):
+            return None
+
+        def verify_block(self, *, verify_ids, **_kwargs):
+            batch, seq_len = verify_ids.shape
+            logits = mx.zeros((batch, seq_len, 5), dtype=mx.float32)
+            logits[..., 3] = 2.0
+            logits[..., 4] = 1.5
+            hidden = [mx.zeros((batch, seq_len, 1), dtype=mx.float32)]
+            return logits, hidden
+
+    candidate = mx.array([1, 1], dtype=mx.uint32)
+    prefix = [3, *([2] * 45)]
+
+    default_window, _ = verify_candidates_batch(
+        target_model=object(),
+        target_ops=TargetOps(),
+        target_cache=[],
+        capture_layer_ids=set(),
+        candidate_ids=[candidate],
+        candidate_sources=["greedy"],
+        suppress_token_mask=None,
+        prefix_len=len(prefix),
+        repetition_prefix_tokens=prefix,
+        repetition_penalty=2.0,
+        repetition_context_size=20,
+    )
+    extended_window, _ = verify_candidates_batch(
+        target_model=object(),
+        target_ops=TargetOps(),
+        target_cache=[],
+        capture_layer_ids=set(),
+        candidate_ids=[candidate],
+        candidate_sources=["greedy"],
+        suppress_token_mask=None,
+        prefix_len=len(prefix),
+        repetition_prefix_tokens=prefix,
+        repetition_penalty=2.0,
+        repetition_context_size=128,
+    )
+
+    assert default_window[0].posterior.tolist() == [3, 3]
+    assert extended_window[0].posterior.tolist() == [4, 4]
 
 
 def test_branch_positions_first_and_margin():
